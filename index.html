@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Label Maker Web</title>
+  <!-- CSV parsing & PDF generation libs -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+  <style>
+    body{font-family:system-ui,sans-serif;margin:2rem;}
+    textarea{width:100%;height:200px;font-family:Menlo,monospace;font-size:12px;}
+    button{padding:.5rem 1rem;margin-top:1rem;}
+    #status{margin-top:.5rem;font-size:.8rem;color:grey;white-space:pre-line;}
+    a#downloadLink{display:none;margin-left:1rem;}
+  </style>
+</head>
+<body>
+  <h1>Label Maker</h1>
+  <textarea id="csvInput" placeholder="Paste CSV here"></textarea>
+  <div id="status">Paste CSV above, then click Generate.</div>
+  <button id="generateBtn">Generate PDF</button>
+  <a id="downloadLink">Download PDF</a>
+
+<script>
+const mmToPt = 2.83464567;
+const pageSize = { w: 100 * mmToPt, h: 40 * mmToPt };
+
+/** Helper that tries several candidate paths for a logo and logs what happens */
+async function loadLogoCandidates(name){
+  // current path of the HTML file
+  const basePath = window.location.pathname.replace(/[^/]*$/, '');
+  const candidates = [
+    `${name}.png`,
+    `${name}.PNG`,
+    `${basePath}${name}.png`,
+    `${basePath}${name}.PNG`,
+    `assets/${name}.png`,
+    `assets/${name}.PNG`
+  ];
+  for(const p of candidates){
+    try{
+      const res = await fetch(p, {cache:'no-cache'});
+      if(res.ok){ console.info(`✓ Loaded ${p}`); return res.arrayBuffer(); }
+      else console.warn(`✗ ${p} – HTTP ${res.status}`);
+    }catch(err){ console.warn(`✗ ${p} – ${err}`); }
+  }
+  console.warn(`⚠️ ${name} logo not found in any candidate path.`);
+  return null;
+}
+
+async function preloadLogos(){
+  const [keliBytes, ceBytes] = await Promise.all([
+    loadLogoCandidates('logokeli'),
+    loadLogoCandidates('ce')
+  ]);
+  return {keliBytes, ceBytes};
+}
+
+async function generatePdf(entries){
+  const { PDFDocument, StandardFonts } = PDFLib;
+  const pdfDoc = await PDFDocument.create();
+  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  // --- logos (optional) ---
+  const {keliBytes, ceBytes} = await preloadLogos();
+  let keliImg, ceImg;
+  if(keliBytes) keliImg = await pdfDoc.embedPng(keliBytes);
+  if(ceBytes)   ceImg   = await pdfDoc.embedPng(ceBytes);
+
+  for(const entry of entries){
+    for(let i=0;i<entry.quantity;i++){
+      const page = pdfDoc.addPage([pageSize.w,pageSize.h]);
+      const margin = 16;
+      const spacing = 12;
+      let y = pageSize.h - margin;
+
+      // header logos + date
+      if(keliImg) page.drawImage(keliImg, {x:margin, y:y-20, width:60, height:20});
+      if(ceImg)   page.drawImage(ceImg,   {x:(pageSize.w-30)/2, y:y-18, width:30, height:18});
+      const dateStr = new Date().toLocaleDateString('en-GB').replaceAll('/', '.');
+      page.drawText(dateStr, {x:pageSize.w-margin-60, y:y-14, size:10, font:boldFont});
+
+      // divider
+      page.drawLine({start:{x:margin,y:y-24}, end:{x:pageSize.w-margin,y:y-24}, thickness:0.8});
+
+      y = y-24-spacing;
+
+      // line1
+      page.drawText(`Order No.: ${entry.orderNumber}   Pos: ${entry.position}   Dim: ${entry.dimension}`, {
+        x:margin, y, size:9, font:boldFont, maxWidth:pageSize.w - margin*2 });
+      y -= 14;
+
+      // line2
+      page.drawText(`Glass Type: ${entry.glassType}`, {x:margin, y, size:10, font:boldFont, maxWidth:pageSize.w - margin*2});
+      y -= 16;
+
+      // line3
+      page.drawText('KELI CE', {x:margin, y, size:10, font:regularFont});
+    }
+  }
+  return pdfDoc.save();
+}
+
+function parseCsv(text){
+  const {data} = Papa.parse(text.trim(), {header:true, skipEmptyLines:true});
+  return data.map(r=>({
+    orderNumber:r.order_number,
+    glassType:r.type,
+    dimension:r.dimension,
+    position:r.position,
+    quantity:parseInt(r.quantity,10)||0
+  })).filter(r=>r.orderNumber && r.quantity>0);
+}
+
+const statusEl = document.getElementById('status');
+
+document.getElementById('generateBtn').addEventListener('click', async()=>{
+  const csv = document.getElementById('csvInput').value;
+  if(!csv.trim()) { statusEl.textContent='CSV is empty.'; return; }
+
+  statusEl.textContent='Parsing…';
+  const entries = parseCsv(csv);
+  if(!entries.length){ statusEl.textContent='No valid rows.'; return; }
+
+  statusEl.textContent='Generating PDF…\n(Watch the console for logo-loading details)';
+  try{
+    const pdfBytes = await generatePdf(entries);
+    const blob = new Blob([pdfBytes],{type:'application/pdf'});
+    const url  = URL.createObjectURL(blob);
+    const link = document.getElementById('downloadLink');
+    link.href=url; link.download='labels.pdf'; link.style.display='inline-block';
+    statusEl.textContent+='\n✅ PDF ready.';
+  }catch(err){
+    console.error(err);
+    statusEl.textContent='Error generating PDF – see console.';
+  }
+});
+</script>
+</body>
+</html>

@@ -115,7 +115,7 @@ async function generatePdf(entries){
       y-=14;
       page.drawText(`Glass Type: ${entry.glassType}`,{x:margin,y,size:10,font:boldFont,maxWidth:pageSize.w-margin*2});
       y-=16;
-      page.drawText('KELI CE',{x:margin,y,size:10,font:regularFont});
+      page.drawText('KELI ALBANIA PVC',{x:margin,y,size:10,font:regularFont});
     }
   }
   return pdfDoc.save();
